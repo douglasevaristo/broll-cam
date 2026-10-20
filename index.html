@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>B-roll Cam</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#000;color:#fff;font-family:-apple-system,system-ui,sans-serif;overflow:hidden}
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  video{width:100%;height:100%;object-fit:cover}
+  #cam{transform:scaleX(-1)}
+  #guide{position:absolute;inset:0;pointer-events:none}
+  #tip{position:absolute;top:calc(env(safe-area-inset-top) + 16px);left:16px;right:16px;text-align:center;
+       background:rgba(0,0,0,.55);padding:10px 14px;border-radius:14px;font-size:15px;line-height:1.35}
+  #count{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:120px;font-weight:800;text-shadow:0 4px 20px #000}
+  #bar{position:absolute;top:0;left:0;height:5px;background:#ef3b2c;width:0}
+  #controls{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 24px);left:0;right:0;display:flex;gap:12px;justify-content:center;align-items:center}
+  button{border:0;border-radius:999px;font-size:16px;font-weight:600;padding:14px 22px;background:#fff;color:#000}
+  #rec{width:76px;height:76px;padding:0;background:#ef3b2c;border:5px solid #fff}
+  #start{position:absolute;inset:0;display:flex;flex-direction:column;gap:18px;align-items:center;justify-content:center;padding:24px;text-align:center;background:#111}
+  #start{justify-content:flex-start;overflow-y:auto;padding-top:calc(env(safe-area-inset-top) + 32px);padding-bottom:40px}
+  #start h1{font-size:28px}
+  #start p{color:#bbb;max-width:360px;line-height:1.45}
+  #start h2{font-size:17px;margin-top:6px}
+  .marquee{width:100vw;overflow:hidden;margin:0 -24px}
+  .track{display:flex;gap:12px;width:max-content;animation:scroll 40s linear infinite}
+  .marquee.rev .track{animation-direction:reverse}
+  @keyframes scroll{to{transform:translateX(-50%)}}
+  .card{width:130px;height:190px;border-radius:16px;background:#222;position:relative;overflow:hidden;flex:none;
+        display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:12px;text-align:center}
+  .card video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  .card .emo{position:absolute;top:50%;left:50%;transform:translate(-50%,-70%);font-size:52px}
+  .card span{position:relative;font-size:13px;font-weight:600;line-height:1.25;text-shadow:0 1px 6px #000}
+  .tips{background:#1d1d1d;border-radius:16px;padding:16px;max-width:360px;text-align:left;font-size:14px;line-height:1.5;color:#ddd}
+  .tips b{color:#fff}
+  .hide{display:none!important}
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="cam" autoplay playsinline muted></video>
+  <video id="preview" class="hide" playsinline loop controls></video>
+
+  <svg id="guide" viewBox="0 0 650 1212" preserveAspectRatio="xMidYMid slice">
+    <rect x="51" y="481" width="547" height="740" fill="none" stroke="#ef3b2c" stroke-width="8" stroke-dasharray="22 18"/>
+    <g fill="#fff" opacity=".22">
+      <ellipse cx="341" cy="600" rx="102" ry="122"/>
+      <ellipse cx="341" cy="1000" rx="182" ry="315"/>
+    </g>
+  </svg>
+
+  <div id="tip">Fique dentro da área vermelha 👇<br>Faça algo do dia a dia — <b>sem olhar pra câmera</b></div>
+  <div id="count"></div>
+  <div id="bar"></div>
+
+  <div id="controls">
+    <button id="rec" aria-label="Gravar"></button>
+    <button id="again" class="hide">Regravar</button>
+    <button id="save" class="hide">Salvar vídeo</button>
+  </div>
+
+  <div id="start">
+    <h1>🎬 B-roll Cam</h1>
+    <p>Não sabe o que gravar? Escolhe uma dessas e só age naturalmente 👇</p>
+    <div class="marquee"><div class="track" id="row1"></div></div>
+    <div class="marquee rev"><div class="track" id="row2"></div></div>
+    <div class="tips">
+      📱 <b>Arruma um tripé</b> (ou apoia o celular numa pilha de livros) na altura do peito.<br>
+      🧍 Seu corpo fica na <b>parte de baixo</b> da tela.<br>
+      👀 <b>Não olhe pra câmera</b> — finge que ela não existe.<br>
+      ⏱️ São só <b>12 segundos</b>.
+    </div>
+    <button id="go">Abrir câmera</button>
+  </div>
+</div>
+
+<script>
+// Pra trocar por vídeo real depois: adicione video: 'videos/cafe.mp4'
+const IDEAS = [
+  { emo: '🛋️', text: 'No sofá trocando de canal' },
+  { emo: '💻', text: 'Digitando no computador' },
+  { emo: '☕', text: 'Bebendo um café' },
+  { emo: '🍳', text: 'Cozinhando' },
+  { emo: '📖', text: 'Lendo um livro' },
+  { emo: '🪟', text: 'Olhando pela janela' },
+  { emo: '📝', text: 'Anotando num caderno' },
+  { emo: '🪴', text: 'Regando as plantas' },
+  { emo: '📱', text: 'Mexendo no celular' },
+  { emo: '🧺', text: 'Dobrando roupa' },
+];
+function card(i) {
+  const media = i.video ? `<video src="${i.video}" autoplay muted loop playsinline></video>` : `<div class="emo">${i.emo}</div>`;
+  return `<div class="card">${media}<span>${i.text}</span></div>`;
+}
+const half = Math.ceil(IDEAS.length / 2);
+[[IDEAS.slice(0, half), 'row1'], [IDEAS.slice(half), 'row2']].forEach(([list, id]) => {
+  const html = list.map(card).join('');
+  document.getElementById(id).innerHTML = html + html; // duplicado pra rolar sem emenda
+});
+
+const DURATION = 12, COUNTDOWN = 3;
+const $ = id => document.getElementById(id);
+let stream, blob, ext = 'webm';
+
+$('go').onclick = async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1080 }, height: { ideal: 1920 } },
+      audio: true
+    });
+    $('cam').srcObject = stream;
+    $('start').classList.add('hide');
+  } catch (e) {
+    alert('Não consegui acessar a câmera. Libere a permissão e use https.');
+  }
+};
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+$('rec').onclick = async () => {
+  $('rec').classList.add('hide');
+  $('tip').textContent = 'Prepare-se… lembre: não olhe pra câmera 😉';
+  const c = $('count'); c.style.display = 'flex';
+  for (let i = COUNTDOWN; i > 0; i--) { c.textContent = i; await sleep(1000); }
+  c.style.display = 'none';
+  $('tip').textContent = 'Gravando… aja naturalmente';
+
+  const type = ['video/mp4', 'video/webm;codecs=vp9', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+  ext = type.startsWith('video/mp4') ? 'mp4' : 'webm';
+  const rec = new MediaRecorder(stream, { mimeType: type });
+  const chunks = [];
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  rec.onstop = () => {
+    blob = new Blob(chunks, { type: type.split(';')[0] });
+    showPreview();
+  };
+  rec.start();
+
+  const bar = $('bar');
+  bar.style.transition = 'none'; bar.style.width = '0';
+  requestAnimationFrame(() => { bar.style.transition = `width ${DURATION}s linear`; bar.style.width = '100%'; });
+  await sleep(DURATION * 1000);
+  rec.stop();
+};
+
+function showPreview() {
+  const p = $('preview');
+  p.src = URL.createObjectURL(blob);
+  p.classList.remove('hide'); $('cam').classList.add('hide'); $('guide').classList.add('hide');
+  $('tip').textContent = 'Pronto! Ficou bom?';
+  $('again').classList.remove('hide'); $('save').classList.remove('hide');
+  $('bar').style.width = '0';
+  p.play();
+}
+
+$('again').onclick = () => {
+  $('preview').pause(); $('preview').classList.add('hide');
+  $('cam').classList.remove('hide'); $('guide').classList.remove('hide');
+  $('again').classList.add('hide'); $('save').classList.add('hide'); $('rec').classList.remove('hide');
+  $('tip').innerHTML = 'Fique dentro da área vermelha 👇<br>Faça algo do dia a dia — <b>sem olhar pra câmera</b>';
+};
+
+$('save').onclick = async () => {
+  const file = new File([blob], `broll-${Date.now()}.${ext}`, { type: blob.type });
+  // No celular, o menu de compartilhar tem "Salvar vídeo" → vai pra galeria
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file); a.download = file.name; a.click();
+};
+</script>
+</body>
+</html>
