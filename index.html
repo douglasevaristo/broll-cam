@@ -266,6 +266,7 @@ function beep() {
 }
 
 $('again').onclick = () => {
+  if (!confirm('Gravar de novo? O vídeo atual vai ser descartado (se não baixou, ele some).')) return;
   $('preview').pause(); $('done').style.display = 'none';
   $('rec').classList.remove('hide');
   armed = true;
