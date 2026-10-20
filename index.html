@@ -42,6 +42,10 @@
   #look{position:absolute;left:16px;right:16px;top:45%;display:none;text-align:center;background:#ffd400;color:#000;
         font-size:24px;font-weight:800;padding:18px;border-radius:18px;animation:shake .3s infinite alternate}
   @keyframes shake{from{transform:rotate(-2deg)}to{transform:rotate(2deg)}}
+  #done{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+        background:#22c55e;color:#fff;font-size:44px;font-weight:800;text-align:center}
+  #done small{font-size:18px;font-weight:600;opacity:.9}
+  #palm{position:absolute;inset:0;pointer-events:none;border:0 solid #22c55e;transition:border-width .15s}
   .hide{display:none!important}
 </style>
 </head>
@@ -58,10 +62,12 @@
     </g>
   </svg>
 
-  <div id="tip">Fique dentro da área vermelha 👇<br>Faça algo do dia a dia — <b>sem olhar pra câmera</b></div>
+  <div id="tip">Fique dentro da área vermelha 👇<br>✋ <b>Mostre a mão aberta</b> pra começar a gravar</div>
   <div id="count"></div>
   <div id="bar"></div>
   <div id="timer"></div>
+  <div id="palm"></div>
+  <div id="done">✅ Pronto!<small>Volta aqui pra ver como ficou</small></div>
   <div id="look">👀 Não olha pra câmera!<br>Age natural 😉</div>
 
   <div id="controls">
@@ -79,7 +85,7 @@
       📱 <b>Arruma um tripé</b> (ou apoia o celular numa pilha de livros) na altura do peito.<br>
       🧍 Seu corpo fica na <b>parte de baixo</b> da tela.<br>
       👀 <b>Não olhe pra câmera</b> — finge que ela não existe.<br>
-      ⏱️ São só <b>12 segundos</b>.
+      ✋ Mostre a <b>mão aberta</b> pra câmera e a gravação começa sozinha.<br>⏱️ São só <b>12 segundos</b> — a tela fica <b>verde</b> quando acabar.
     </div>
     <button id="go">Abrir câmera</button>
   </div>
@@ -122,6 +128,7 @@ $('go').onclick = async () => {
     $('cam').srcObject = stream;
     $('start').classList.add('hide');
     loadLandmarker();
+    armed = true;
   } catch (e) {
     alert('Não consegui acessar a câmera. Libere a permissão e use https.');
   }
@@ -129,14 +136,20 @@ $('go').onclick = async () => {
 
 // ---- Detecta se a pessoa está olhando pra câmera (MediaPipe Face Landmarker) ----
 let watching = false, landmarker = null, lookingSince = 0;
+let armed = false, gesturer = null, palmSince = 0;
 async function loadLandmarker() {
   try {
-    const { FaceLandmarker, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    const { FaceLandmarker, GestureRecognizer, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
     const fs = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
     landmarker = await FaceLandmarker.createFromOptions(fs, {
       baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task', delegate: 'GPU' },
       runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true
     });
+    // ✋ mão aberta = começar a gravar à distância
+    gesturer = await GestureRecognizer.createFromOptions(fs, {
+      baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task', delegate: 'GPU' },
+      runningMode: 'VIDEO', numHands: 1
+    }).catch(e => (console.warn('Gesto indisponível', e), null));
     detectLoop();
   } catch (e) { console.warn('Detecção de olhar indisponível', e); }
 }
@@ -158,12 +171,22 @@ function detectLoop() {
     if (looking) lookingSince ||= performance.now(); else lookingSince = 0;
     $('look').style.display = lookingSince && performance.now() - lookingSince > 400 ? 'block' : 'none';
   }
+  if (armed && gesturer && v.readyState >= 2) {
+    const g = gesturer.recognizeForVideo(v, performance.now()).gestures?.[0]?.[0];
+    const palm = g?.categoryName === 'Open_Palm' && g.score > 0.6;
+    if (palm) palmSince ||= performance.now(); else palmSince = 0;
+    const held = palmSince ? (performance.now() - palmSince) / 600 : 0;
+    $('palm').style.borderWidth = palm ? `${Math.min(held, 1) * 14}px` : '0';
+    if (held >= 1) { palmSince = 0; $('palm').style.borderWidth = '0'; $('rec').click(); }
+  }
   setTimeout(detectLoop, 100);
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 $('rec').onclick = async () => {
+  if (!armed) return;
+  armed = false;
   $('rec').classList.add('hide');
   $('tip').textContent = 'Prepare-se… lembre: não olhe pra câmera 😉';
   const c = $('count'); c.style.display = 'flex';
@@ -176,8 +199,11 @@ $('rec').onclick = async () => {
   const rec = new MediaRecorder(stream, { mimeType: type });
   const chunks = [];
   rec.ondataavailable = e => e.data.size && chunks.push(e.data);
-  rec.onstop = () => {
+  rec.onstop = async () => {
     blob = new Blob(chunks, { type: type.split(';')[0] });
+    $('done').style.display = 'flex';   // tela verde: dá pra ver de longe que acabou
+    await sleep(1800);
+    $('done').style.display = 'none';
     showPreview();
   };
   rec.start();
@@ -218,7 +244,8 @@ $('again').onclick = () => {
   $('preview').pause(); $('preview').classList.add('hide');
   $('cam').classList.remove('hide'); $('guide').classList.remove('hide');
   $('again').classList.add('hide'); $('save').classList.add('hide'); $('rec').classList.remove('hide');
-  $('tip').innerHTML = 'Fique dentro da área vermelha 👇<br>Faça algo do dia a dia — <b>sem olhar pra câmera</b>';
+  armed = true;
+  $('tip').innerHTML = 'Fique dentro da área vermelha 👇<br>✋ <b>Mostre a mão aberta</b> pra começar a gravar';
 };
 
 $('save').onclick = async () => {
