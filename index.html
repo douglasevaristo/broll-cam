@@ -7,7 +7,7 @@
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;background:#000;color:#fff;font-family:-apple-system,system-ui,sans-serif;overflow:hidden}
-  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  #stage{position:fixed;top:0;bottom:0;left:50%;transform:translateX(-50%);width:min(100vw,56.25vh);overflow:hidden;background:#111;display:flex;align-items:center;justify-content:center}
   video{width:100%;height:100%;object-fit:cover}
   #cam{transform:scaleX(-1)}
   #guide{position:absolute;inset:0;pointer-events:none}
@@ -23,7 +23,7 @@
   #start h1{font-size:28px}
   #start p{color:#bbb;max-width:360px;line-height:1.45}
   #start h2{font-size:17px;margin-top:6px}
-  .marquee{width:100vw;overflow:hidden;margin:0 -24px}
+  .marquee{width:calc(100% + 48px);overflow:hidden;margin:0 -24px;flex:none}
   .track{display:flex;gap:12px;width:max-content;animation:scroll 40s linear infinite}
   .marquee.rev .track{animation-direction:reverse}
   @keyframes scroll{to{transform:translateX(-50%)}}
@@ -34,6 +34,14 @@
   .card span{position:relative;font-size:13px;font-weight:600;line-height:1.25;text-shadow:0 1px 6px #000}
   .tips{background:#1d1d1d;border-radius:16px;padding:16px;max-width:360px;text-align:left;font-size:14px;line-height:1.5;color:#ddd}
   .tips b{color:#fff}
+  #timer{position:absolute;top:calc(env(safe-area-inset-top) + 90px);left:50%;transform:translateX(-50%);display:none;
+         width:120px;height:120px;border-radius:50%;background:rgba(239,59,44,.92);align-items:center;justify-content:center;
+         font-size:64px;font-weight:800;font-variant-numeric:tabular-nums;box-shadow:0 6px 30px rgba(0,0,0,.4)}
+  #timer.end{animation:pulse .5s ease-in-out infinite alternate}
+  @keyframes pulse{to{transform:translateX(-50%) scale(1.15)}}
+  #look{position:absolute;left:16px;right:16px;top:45%;display:none;text-align:center;background:#ffd400;color:#000;
+        font-size:24px;font-weight:800;padding:18px;border-radius:18px;animation:shake .3s infinite alternate}
+  @keyframes shake{from{transform:rotate(-2deg)}to{transform:rotate(2deg)}}
   .hide{display:none!important}
 </style>
 </head>
@@ -53,6 +61,8 @@
   <div id="tip">Fique dentro da área vermelha 👇<br>Faça algo do dia a dia — <b>sem olhar pra câmera</b></div>
   <div id="count"></div>
   <div id="bar"></div>
+  <div id="timer"></div>
+  <div id="look">👀 Não olha pra câmera!<br>Age natural 😉</div>
 
   <div id="controls">
     <button id="rec" aria-label="Gravar"></button>
@@ -75,7 +85,7 @@
   </div>
 </div>
 
-<script>
+<script type="module">
 // Pra trocar por vídeo real depois: adicione video: 'videos/cafe.mp4'
 const IDEAS = [
   { emo: '🛋️', text: 'No sofá trocando de canal' },
@@ -107,14 +117,49 @@ $('go').onclick = async () => {
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 1080 }, height: { ideal: 1920 } },
-      audio: true
+      audio: false
     });
     $('cam').srcObject = stream;
     $('start').classList.add('hide');
+    loadLandmarker();
   } catch (e) {
     alert('Não consegui acessar a câmera. Libere a permissão e use https.');
   }
 };
+
+// ---- Detecta se a pessoa está olhando pra câmera (MediaPipe Face Landmarker) ----
+let watching = false, landmarker = null, lookingSince = 0;
+async function loadLandmarker() {
+  try {
+    const { FaceLandmarker, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    const fs = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    landmarker = await FaceLandmarker.createFromOptions(fs, {
+      baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task', delegate: 'GPU' },
+      runningMode: 'VIDEO', numFaces: 1, outputFaceBlendshapes: true
+    });
+    detectLoop();
+  } catch (e) { console.warn('Detecção de olhar indisponível', e); }
+}
+function isLookingAtCamera(res) {
+  const lm = res.faceLandmarks?.[0], bs = res.faceBlendshapes?.[0]?.categories;
+  if (!lm || !bs) return false;
+  // cabeça de frente: nariz no meio das bochechas
+  const yaw = (lm[1].x - lm[234].x) / (lm[454].x - lm[234].x);
+  if (yaw < 0.38 || yaw > 0.62) return false;
+  // olhos centralizados: nenhum "eyeLook" forte (baixo, cima, lados)
+  const eyeMove = Math.max(...bs.filter(c => c.categoryName.startsWith('eyeLook')).map(c => c.score));
+  const closed = Math.min(bs.find(c => c.categoryName === 'eyeBlinkLeft').score, bs.find(c => c.categoryName === 'eyeBlinkRight').score);
+  return eyeMove < 0.35 && closed < 0.5;
+}
+function detectLoop() {
+  const v = $('cam');
+  if (watching && v.readyState >= 2) {
+    const looking = isLookingAtCamera(landmarker.detectForVideo(v, performance.now()));
+    if (looking) lookingSince ||= performance.now(); else lookingSince = 0;
+    $('look').style.display = lookingSince && performance.now() - lookingSince > 400 ? 'block' : 'none';
+  }
+  setTimeout(detectLoop, 100);
+}
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -140,7 +185,22 @@ $('rec').onclick = async () => {
   const bar = $('bar');
   bar.style.transition = 'none'; bar.style.width = '0';
   requestAnimationFrame(() => { bar.style.transition = `width ${DURATION}s linear`; bar.style.width = '100%'; });
-  await sleep(DURATION * 1000);
+  const t = $('timer'); t.style.display = 'flex';
+  const t0 = performance.now();
+  watching = true;
+  await new Promise(done => {
+    const tick = () => {
+      const left = DURATION - (performance.now() - t0) / 1000;
+      if (left <= 0) return done();
+      t.textContent = Math.ceil(left);
+      t.classList.toggle('end', left <= 3);
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+  watching = false;
+  t.style.display = 'none'; t.classList.remove('end');
+  $('look').style.display = 'none';
   rec.stop();
 };
 
