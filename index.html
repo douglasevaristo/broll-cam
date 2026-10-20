@@ -42,9 +42,14 @@
   #look{position:absolute;left:16px;right:16px;top:45%;display:none;text-align:center;background:#ffd400;color:#000;
         font-size:24px;font-weight:800;padding:18px;border-radius:18px;animation:shake .3s infinite alternate}
   @keyframes shake{from{transform:rotate(-2deg)}to{transform:rotate(2deg)}}
-  #done{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;
-        background:#22c55e;color:#fff;font-size:44px;font-weight:800;text-align:center}
-  #done small{font-size:18px;font-weight:600;opacity:.9}
+  #done{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:28px;
+        background:#7bc144;color:#111;text-align:center;padding:24px;z-index:5}
+  #done h2{font-size:30px;font-weight:800}
+  #preview{width:58%;max-width:260px;aspect-ratio:9/16;height:auto;object-fit:cover;border-radius:10px;transform:rotate(-4deg);
+           box-shadow:0 12px 30px rgba(0,0,0,.25);background:#000}
+  #done .btns{display:flex;flex-direction:column;gap:12px;width:100%;max-width:280px}
+  #save{background:#111;color:#fff;padding:16px}
+  #again{background:rgba(255,255,255,.85);color:#111;padding:16px}
   #palm{position:absolute;inset:0;pointer-events:none;border:0 solid #22c55e;transition:border-width .15s}
   .hide{display:none!important}
 </style>
@@ -52,7 +57,6 @@
 <body>
 <div id="stage">
   <video id="cam" autoplay playsinline muted></video>
-  <video id="preview" class="hide" playsinline loop controls></video>
 
   <svg id="guide" viewBox="0 0 650 1212" preserveAspectRatio="xMidYMid slice">
     <rect x="51" y="481" width="547" height="740" fill="none" stroke="#ef3b2c" stroke-width="8" stroke-dasharray="22 18"/>
@@ -67,13 +71,18 @@
   <div id="bar"></div>
   <div id="timer"></div>
   <div id="palm"></div>
-  <div id="done">✅ Pronto!<small>Volta aqui pra ver como ficou</small></div>
+  <div id="done">
+    <h2>✅ Ficou pronto!</h2>
+    <video id="preview" playsinline loop muted></video>
+    <div class="btns">
+      <button id="save">⬇️ Baixar</button>
+      <button id="again">↺ Gravar novamente</button>
+    </div>
+  </div>
   <div id="look">👀 Não olha pra câmera!<br>Age natural 😉</div>
 
   <div id="controls">
     <button id="rec" aria-label="Gravar"></button>
-    <button id="again" class="hide">Regravar</button>
-    <button id="save" class="hide">Salvar vídeo</button>
   </div>
 
   <div id="start">
@@ -120,6 +129,7 @@ const $ = id => document.getElementById(id);
 let stream, blob, ext = 'webm';
 
 $('go').onclick = async () => {
+  unlockAudio(); // navegador só libera som depois de um toque
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 1080 }, height: { ideal: 1920 } },
@@ -201,9 +211,7 @@ $('rec').onclick = async () => {
   rec.ondataavailable = e => e.data.size && chunks.push(e.data);
   rec.onstop = async () => {
     blob = new Blob(chunks, { type: type.split(';')[0] });
-    $('done').style.display = 'flex';   // tela verde: dá pra ver de longe que acabou
-    await sleep(1800);
-    $('done').style.display = 'none';
+    beep();
     showPreview();
   };
   rec.start();
@@ -230,20 +238,36 @@ $('rec').onclick = async () => {
   rec.stop();
 };
 
+// tela verde fica até a pessoa escolher: dá pra ver de longe que acabou
 function showPreview() {
   const p = $('preview');
   p.src = URL.createObjectURL(blob);
-  p.classList.remove('hide'); $('cam').classList.add('hide'); $('guide').classList.add('hide');
-  $('tip').textContent = 'Pronto! Ficou bom?';
-  $('again').classList.remove('hide'); $('save').classList.remove('hide');
+  $('done').style.display = 'flex';
   $('bar').style.width = '0';
   p.play();
 }
 
+// apito de "terminou" (3 bipes curtos)
+let audioCtx;
+function unlockAudio() {
+  audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume();
+}
+function beep() {
+  if (!audioCtx) return;
+  [0, 0.18, 0.36].forEach((d, i) => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.frequency.value = i === 2 ? 1320 : 880;
+    g.gain.setValueAtTime(0.4, audioCtx.currentTime + d);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + d + 0.15);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(audioCtx.currentTime + d); o.stop(audioCtx.currentTime + d + 0.16);
+  });
+}
+
 $('again').onclick = () => {
-  $('preview').pause(); $('preview').classList.add('hide');
-  $('cam').classList.remove('hide'); $('guide').classList.remove('hide');
-  $('again').classList.add('hide'); $('save').classList.add('hide'); $('rec').classList.remove('hide');
+  $('preview').pause(); $('done').style.display = 'none';
+  $('rec').classList.remove('hide');
   armed = true;
   $('tip').innerHTML = 'Fique dentro da área vermelha 👇<br>✋ <b>Mostre a mão aberta</b> pra começar a gravar';
 };
